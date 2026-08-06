@@ -1,6 +1,6 @@
 # Climate-Resilient Conservation Prioritization Using GIS and Machine Learning
 
-**A reproducible, transferable framework for optimizing conservation land acquisition under budget constraints — demonstrated using mountain lion (*Puma concolor*) habitat in California.**
+**A reproducible, transferable framework for optimizing conservation land acquisition under budget constraints, demonstrated using mountain lion (*Puma concolor*) habitat in California.**
 
 AJ Sager
 
@@ -18,7 +18,7 @@ California's capacity to fund conservation land protection is limited relative t
 2. Scores every 10km × 10km cell in California on habitat value, wildfire risk, protection gaps, climate resilience, and corridor connectivity
 3. Solves a budget-constrained optimization to select the parcel set that maximizes conservation value per dollar spent
 
-**This is a methodological framework, not a species-specific study.** Every input layer — species occurrence, wildfire history, protection status, climate — is swappable. The same pipeline could be re-run for black bear or spotted owl habitat, wildfire-adjacent restoration planning, or carbon-focused land acquisition, without altering the underlying methodology (see [Generalizability](#generalizability)).
+**This is a methodological framework, not a species-specific study.** Every input layer between species occurrence, wildfire history, protection status, and climate is swappable. The same pipeline could be re-run for black bear or spotted owl habitat, wildfire-adjacent restoration planning, or carbon-focused land acquisition, without altering the underlying methodology (see [Generalizability](#generalizability)).
 
 📄 **Full write-up:** [`report/Conservation_Prioritization_Paper.docx`](report/Conservation_Prioritization_Paper.docx)
 📓 **Full analysis:** [`notebooks/conservation_prioritization.ipynb`](notebooks/conservation_prioritization.ipynb)
@@ -32,7 +32,7 @@ California's capacity to fund conservation land protection is limited relative t
 | Species distribution model performance | Random Forest, AUC = 0.945 (random split) → **0.841 under spatial block cross-validation** |
 | Model comparison | Random Forest (0.945) and XGBoost (0.944) both clearly outperformed Logistic Regression (0.635) |
 | Optimized vs. naive budget allocation | **80.5% higher** total conservation value at an equivalent $2.46B budget (200 cells vs. 56) |
-| Corridor land captured by optimization | **11.5%** of selected land, vs. ~2% of all land statewide — a ~6× overrepresentation with no explicit corridor constraint |
+| Corridor land captured by optimization | **11.5%** of selected land, vs. ~2% of all land statewide, representing a ~6× overrepresentation with no explicit corridor constraint |
 | Weight sensitivity | 4 of the top 50 priority cells were robust across ≥90% of 500 randomly reweighted simulations |
 | External validation (vs. CDFW ACE dataset) | 78.5% of top-10% priority cells fell in ACE's top biodiversity tier, vs. a 37.2% baseline (>2× expected rate) |
 
@@ -41,7 +41,7 @@ California's capacity to fund conservation land protection is limited relative t
 ## Figures
 
 **Figure 1 — Manual occurrence proxy vs. ML-predicted habitat suitability** (Spearman's ρ = 0.406)
-Citizen-science sightings alone (A) cluster near accessible, populated areas. The Random Forest model (B) instead reveals continuous high-suitability habitat tracing the Sierra Nevada and coastal mountain ranges — evidence that ML modeling recovers ecologically coherent habitat that raw observation data misses.
+Citizen-science sightings alone (A) cluster near accessible, populated areas. The Random Forest model (B) instead reveals continuous high-suitability habitat tracing the Sierra Nevada and coastal mountain ranges, which is evidence that ML modeling recovers ecologically coherent habitat that raw observation data misses.
 
 ![Manual proxy vs. ML-predicted habitat suitability](figures/fig1_v1_vs_v2.png)
 
@@ -80,7 +80,7 @@ The naive strategy scores higher *per cell*, but the optimized strategy delivers
 
 ### No-regret priorities across budget scenarios
 
-Re-solving the optimization at four budget levels (−10%, base, +10%, +25%) showed selections were fully nested — no cell selected at a lower budget was ever dropped at a higher one. 184 of 200 base-selection cells (92%) were selected across **all four** budget levels, representing "no-regret" priorities whose value doesn't depend on the exact budget available. These were geographically widespread (45 counties), concentrated most heavily in San Diego (21 cells), San Bernardino (12), Ventura (10), and Riverside (10) — while the single highest-scoring individual cells clustered tightly along the Central Coast.
+Re-solving the optimization at four budget levels (−10%, base, +10%, +25%) showed selections were fully nested, where no cell selected at a lower budget was ever dropped at a higher one. 184 of 200 base-selection cells (92%) were selected across **all four** budget levels, representing "no-regret" priorities whose value doesn't depend on the exact budget available. These were geographically widespread (45 counties), concentrated most heavily in San Diego (21 cells), San Bernardino (12), Ventura (10), and Riverside (10), while the single highest-scoring individual cells clustered tightly along the Central Coast.
 
 ---
 
@@ -92,7 +92,7 @@ Re-solving the optimization at four budget levels (−10%, base, +10%, +25%) sho
 | **Species occurrence** | GBIF (`pygbif`), 2,349 filtered human observations (<5km coordinate uncertainty) |
 | **Habitat suitability** | Random Forest classifier (200 trees), 4 climate/elevation predictors, evaluated via both random split and **spatial block cross-validation** (205 ~50km blocks) to correct for spatial autocorrelation inflation |
 | **Model comparison** | Random Forest vs. XGBoost vs. Logistic Regression on an identical train/test split |
-| **Confounding diagnostic** | A distance-to-road predictor showed a negative correlation with suitability (Spearman's ρ = −0.257) — consistent with observation-effort bias, not genuine road avoidance — and was excluded from the final model |
+| **Confounding diagnostic** | A distance-to-road predictor showed a negative correlation with suitability (Spearman's ρ = −0.257), which is consistent with observation-effort bias, not genuine road avoidance, and was excluded from the final model |
 | **Future climate** | WorldClim 2.1 CMIP6, MPI-ESM1-2-HR model, SSP2-4.5 scenario, 2061–2080 |
 | **Wildfire risk** | CAL FIRE FRAP perimeters (2000–2025), log-transformed cumulative burned acreage |
 | **Protection status** | CPAD Holdings — true overlap area between each cell and protected-area geometries |
