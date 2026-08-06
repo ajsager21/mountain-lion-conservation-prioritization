@@ -1,0 +1,366 @@
+**Climate-Resilient Conservation Prioritization Using GIS and Machine Learning:**
+
+**Optimizing Conservation Investments Under Climate Change**
+
+A.J. Sager
+
+*University of California, Irvine*
+
+**Abstract**
+
+*Draft below based on your results - refine wording once the rest of the paper is finalized.*
+
+This study presents a modular, reproducible GIS framework that integrates species distribution modeling, climate resilience, connectivity analysis, and spatial optimization to identify robust conservation investments under uncertainty, demonstrated using mountain lions *(Puma concolor) *in California. California's capacity to fund conservation land protection is limited relative to the scale of habitat under pressure from development, wildfire, and climate change. This study develops a reproducible, transferable framework for conservation prioritization, demonstrated using mountain lions *(Puma concolor)* in California, integrating species occurrence data, wildfire history, existing protection status, current and projected future (2061-2080, SSP2-4.5) climate variables, and habitat connectivity across a 10km grid of 4,498 planning units. Habitat suitability was modeled using a Random Forest classifier, selected over Logistic Regression (AUC = 0.635) and XGBoost (AUC = 0.944) based on comparative performance under a standard random train/test split; under a more conservative spatial block cross-validation scheme designed to control for spatial autocorrelation in occurrence data, the selected model achieved an AUC of 0.841. A diagnostic test of a distance-to-road predictor revealed a negative correlation with predicted suitability, consistent with observation-effort bias rather than genuine road avoidance; this predictor was excluded from the final model and retained as a demonstrated example of confounding in presence-only species distribution modeling. Least-cost path analysis identified corridors connecting the five largest core habitat clusters, of which 47.7% of corridor cells had less than 30% existing protection. A final connectivity-aware priority score, combining habitat suitability, wildfire risk, protection status, climate resilience, and corridor importance, was used in a budget-constrained knapsack optimization: given a $2.46 billion budget (2% of the estimated $123.2 billion statewide conservation need), the optimized selection of 200 cells achieved an 80.5% higher combined priority score than a naive top-ranked selection strategy, and allocated corridor land at nearly six times the rate expected by chance (11.5% of selected land vs. 2% of all land), despite receiving no explicit corridor-selection instruction. These results demonstrate the practical value of integrating species distribution modeling, connectivity analysis, and optimization into a single, reproducible, and transferable conservation decision framework.
+
+***Keywords: conservation prioritization, species distribution modeling, GIS, machine learning, wildfire risk, climate resilience, landscape connectivity, least-cost path, integer programming***
+
+**1. Introduction**
+
+California's capacity to fund conservation land protection is limited relative to the scale of habitat under pressure from development, wildfire, and climate change. Existing prioritization approaches often rely on either expert intuition or single-variable heuristics (e.g., protecting land solely because it is currently occupied habitat), which are difficult to audit, replicate, or update as new data becomes available. This study addresses a narrower question than 'where should conservation happen for mountain lions', and instead asks how conservation investment decisions can be made more objective, transparent, and reproducible, using mountain lions in California as a demonstration case rather than an endpoint in themselves.
+
+The contribution of this work is therefore methodological rather than purely applied: a framework that integrates species distribution modeling, multi-criteria spatial prioritization, and budget-constrained optimization into a single, reproducible pipeline. Every input layer used here between species occurrence, wildfire history, protection status, and climate projections is swappable. The framework is fully transferable to any species or region through replacement of the input datasets, and the same pipeline could in principle support prioritization for black bear or California spotted owl habitat, wildfire-adjacent restoration planning, or carbon-focused land acquisition, without altering the underlying methodology. In one sentence: this study presents a modular, reproducible GIS framework that integrates species distribution modeling, climate resilience, connectivity, and spatial optimization to identify robust conservation investments under uncertainty, where mountain lions are the demonstration species through which this framework is built and tested, not the primary object of study.
+
+*Existing conservation planning frameworks such as Marxan (Ball et al. 2009) and Zonation (Moilanen et al. 2009) emphasize systematic, planning-unit-based reserve selection, while the ecological species distribution modeling literature has increasingly recognized the importance of appropriate pseudo-absence generation (Barbet-Massin et al. 2012), spatially explicit model validation that accounts for spatial autocorrelation (Roberts et al. 2017), and resistance-surface-based landscape connectivity (McRae et al. 2008). These three bodies of work - systematic conservation planning, species distribution modeling methodology, and landscape connectivity science - have **largely developed and been applied separately. The framework presented here integrates concepts from all three into a single reproducible, open-source workflow: a species distribution model built and validated according to current SDM methodological guidance, embedded within a spatial prioritization and budget-constrained optimization structure conceptually related to systematic conservation planning tools, extended with an explicit connectivity analysis.*
+
+***1.1 Primary Research Question***
+
+Across California's mountain lion range, which grid cells offer the greatest long-term conservation value while accounting for current and climate-projected habitat suitability, wildfire risk, and existing protection gaps, and how should a limited conservation budget be allocated across them to maximize outcomes?
+
+***1.2 Species Selection Rationale***
+
+Mountain lions *(Puma concolor) *were selected as the focal species for this analysis based on their function as an umbrella species (Roberge & Angelstam 2004): their large home ranges and sensitivity to habitat fragmentation mean that conservation actions protecting mountain lion habitat are likely to concurrently protect a broad range of co-occurring biodiversity. Mountain lions also maintain substantially wider occurrence coverage across California than more range-restricted species (e.g., California condor), providing a stronger empirical basis for species distribution modeling.
+
+*Figure 0. Conceptual framework showing the modular conservation decision-support pipeline. Orange stages require species-specific data; blue stages are algorithmic and reusable across species and regions.*
+
+**2. Data and Methods**
+
+***2.1 Study Area and Spatial Unit***
+
+The study area encompasses the state of California. Rather than using administrative boundaries (e.g., counties) as the unit of analysis, a uniform 10km x 10km grid was constructed by tiling the state's bounding box in the California Albers Equal Area projection (EPSG:3310) and retaining only cells intersecting the state boundary, yielding 4,498 grid cells. This grid-cell approach follows the convention used in established conservation planning tools (e.g., Marxan, Zonation) and enables environmental raster data to be processed at native resolution before aggregation, rather than being constrained to coarser administrative units.
+
+A 10km grid resolution was selected as a balance between computational tractability and ecological relevance: it matches the native resolution of the WorldClim 2.1 climate data (2.5 arc-minutes, approximately 4.6km at California's latitude) closely enough to avoid excessive interpolation, while remaining coarse enough to keep the resulting 4,498-cell grid computationally manageable for both the spatial optimization (Section 2.7) and the 500-iteration sensitivity analysis (Section 2.9). This resolution is also broadly consistent with planning-unit approaches commonly implemented in established systematic conservation planning tools such as Marxan and Zonation, which support a range of planning-unit shapes (including but not limited to regular grids) rather than requiring any single unit type. A finer resolution (e.g., 1km) would better capture local habitat heterogeneity but would increase the optimization problem size by roughly two orders of magnitude and would require downscaling climate data beyond its native resolution; a coarser resolution (e.g., 25km) would reduce computational burden further but risks obscuring the fine-grained corridor structure identified in Section 2.8. The sensitivity of the study's conclusions to this specific resolution choice was not formally tested and is identified as a limitation (Section 5).
+
+***2.2 Data Sources***
+
+| **Input** | **Source** | **Notes** |
+| --- | --- | --- |
+| Species occurrence | GBIF (pygbif) | 2,349 mountain lion observation records, CA, filtered to human observations with <5km coordinate uncertainty |
+| Boundaries | US Census TIGER/Line | 58 CA counties, dissolved to state outline |
+| Climate (historical) | WorldClim 2.1 (2.5 arc-minute) | Annual mean temperature, temperature seasonality, annual precipitation |
+| Climate (future projection) | WorldClim 2.1 CMIP6, MPI-ESM1-2-HR, SSP2-4.5, 2061-2080 | Bioclimatic variables, downscaled and bias-corrected against WorldClim 2.1 baseline |
+| Elevation | WorldClim 2.1 (2.5 arc-minute) |  |
+| Wildfire history | CAL FIRE FRAP (firep25_1) | 8,892 fire perimeters, 2000-2025 |
+| Protected areas | CPAD 2026a (Holdings layer) | 162,773 parcels; 160,473 after excluding water bodies |
+
+*Table 1. Data sources used in this analysis.*
+
+***2.3 Data Cleaning and Integration***
+
+GBIF occurrence records were filtered to retain only direct human observations (excluding preserved specimens and literature-derived material citations) with coordinate uncertainty under 5km, reducing an initial 4,551 records to 2,349. Fire perimeters were restricted to the 2000-2025 period to reflect current wildfire risk conditions, reducing 23,334 total historical records to 8,892. CPAD protected-area parcels were filtered to exclude water bodies (2,300 of 162,773 parcels) and geometries were validated prior to spatial overlay. All layers were reprojected to a common coordinate reference system (EPSG:3310) and joined to the 10km grid: point data (occurrences) via spatial join, polygon data (fire perimeters, protected areas) via intersection/overlay to compute per-cell frequency and area-weighted metrics, and raster data (climate, elevation) via point sampling at cell centroids, with nearest-neighbor spatial interpolation used to fill the 361 cells (8%) where centroid sampling intersected raster nodata regions near the coastline and state border.
+
+The datasets integrated in this study span different temporal windows: GBIF occurrence records reflect observations submitted primarily over the past two decades, WorldClim 2.1 historical climate normals represent averaged conditions from 1970-2000, wildfire history was restricted to 2000-2025, and CPAD protected-area boundaries reflect current (2026) protection status. This temporal mismatch means the study's habitat suitability model is trained on a climate baseline that predates most of the occurrence data it is fit to, and that current protection status is compared against fire and occurrence patterns from up to 25 years prior. This is a common limitation in conservation data synthesis, since few datasets of this kind are collected on matched timelines, but it means the resulting model should be interpreted as a synthesis of recent-past and current conditions rather than a single, temporally consistent snapshot.
+
+***2.4 Habitat Suitability Model***
+
+Two approaches to habitat suitability were developed and compared. The first (v1) used log-transformed, min-max scaled occurrence counts per grid cell as a direct proxy for habitat suitability. The second (v2) trained a Random Forest classifier (200 trees, balanced class weighting), selected for its established strong performance and interpretability in ecological classification tasks (Cutler et al. 2007), to distinguish presence locations (n=2,349) from 5,000 randomly sampled background points across California, using four predictors: annual mean temperature, temperature seasonality, annual precipitation, and elevation. The model was evaluated on a held-out 20% test set and achieved an AUC of 0.945. Feature importances were relatively evenly distributed across predictors (temperature seasonality: 0.309, mean temperature: 0.251, annual precipitation: 0.249, elevation: 0.192), consistent with a genuine multi-variable climate response rather than reliance on a single dominant feature.
+
+The relatively even distribution of feature importances across predictors (Section 2.4) has a plausible ecological interpretation. Temperature seasonality and mean annual temperature together accounted for the largest share of predictive importance, consistent with mountain lions' known sensitivity to climate extremes: prey availability and thermoregulatory demands both vary with seasonal temperature swings, and mountain lions in California are broadly absent from the hottest, most temperature-variable desert regions of the state. Annual precipitation's contribution likely reflects its role as a proxy for vegetation density and prey habitat rather than a direct physiological constraint. Elevation's comparatively lower (though still meaningful) importance was somewhat unexpected given mountain lions' well-documented preference for rugged, high-relief terrain; this may indicate that elevation's effect is partially captured indirectly through its correlation with temperature and precipitation in this model, rather than acting as an independent signal.
+
+Background (pseudo-absence) points were generated by uniform random sampling within the California state boundary, at a 1:2.1 ratio of presence to background points (2,349 presence, 5,000 background), a ratio within the range evaluated for classification-based species distribution models such as Random Forest, for which approximately equal numbers of presence and background points have generally performed well (Barbet-Massin et al. 2012); the paper does not endorse a single universal ratio, and the optimal choice remains dependent on both algorithm and sampling context. This choice was not without tradeoffs: uniform random background sampling assumes that survey effort was approximately uniform across the study area, an assumption directly contradicted by the observation-effort bias discussed throughout this paper (e.g., Section 2.4's road-distance diagnostic). An alternative, target-group background sampling approach, done by drawing background points from the locations of other, co-surveyed species rather than uniformly at random, would better approximate the true spatial distribution of survey effort and is a natural extension of this work (Section 6). The chosen background-to-presence ratio (approximately 2:1) was not formally tuned; alternative ratios could plausibly shift model calibration and were not explored.
+
+To provide evidence for this modeling choice, three classifiers (Logistic Regression, Random Forest, and XGBoost) were subsequently trained and compared on an identical train/test split augmented with a fifth candidate predictor, distance to nearest primary or secondary road (US Census TIGER/Line), a widely used proxy for landscape fragmentation. Logistic Regression, after feature standardization, achieved an AUC of 0.635; Random Forest and XGBoost achieved 0.949 and 0.944 respectively, providing empirical support for a tree-based, nonlinear classifier over a linear baseline. However, diagnostic inspection revealed a negative correlation (Spearman's rho = -0.257) between distance-to-road and predicted suitability where cells closer to roads were predicted as more suitable, which is inconsistent with the well-documented road-avoidance behavior of large carnivores and is more plausibly explained by road proximity acting as a proxy for human observation effort in the underlying presence data (median distance to road: 3,096m for presence points vs. 5,852m for background points). The road-distance predictor was therefore excluded from the final production model, and this result is retained here as a demonstrated, quantitative example of observation-effort confounding in presence-only species distribution modeling (see Section 5, Limitations).
+
+The AUC values reported above were calculated using a random 80/20 train/test split at the individual-point level, which does not account for spatial autocorrelation: nearby occurrence points are unlikely to be truly independent, and a random split can place highly correlated points on both sides of the train/test boundary, inflating apparent performance. To address this, following recommended practice for ecological data with spatial dependence structure (Roberts et al. 2017), the Random Forest model was re-evaluated using a spatial block cross-validation scheme, in which occurrence and background points were assigned to 205 spatial blocks (approximately 50km per side) and entire blocks, rather than individual points, were randomly assigned to training (n=5,834 points) or test (n=1,515 points) sets. Under this spatially valid evaluation, AUC (Fielding & Bell 1997) dropped to 0.841, compared to 0.945 under the random point-level split. This 0.104 gap is itself a quantitative estimate of the degree to which the original random-split evaluation was inflated by spatial autocorrelation. The spatial block cross-validation AUC (0.841) is reported as the primary, honest performance metric for this model throughout the remainder of this paper; the model used for all subsequent analysis was retrained on the spatial train/test split.
+
+*[Resolved above via spatial block cross-validation - see preceding paragraph.]*
+
+***2.5 Future Climate Projections***
+
+To directly assess climate resilience rather than relying solely on historical climate variability as a proxy, future climate projections were obtained from WorldClim 2.1's downscaled CMIP6 dataset, using the MPI-ESM1-2-HR global climate model under the SSP2-4.5 emissions scenario (a moderate, 'middle of the road' pathway) for the 2061-2080 period, at the same 2.5 arc-minute resolution as the historical baseline. The same three bioclimatic variables (annual mean temperature, temperature seasonality, annual precipitation) were extracted at each grid cell centroid using the same sampling procedure as the historical data, and the change between historical and projected future values was computed for temperature and precipitation at each cell. Projected temperature change was subsequently used as a direct measure of climate stability in the priority scoring formula (Section 2.6), replacing the historical temperature seasonality proxy used in an earlier version of the model.
+
+***2.6 Priority Scoring Formula***
+
+Priority = 0.30(Habitat Suitability) + 0.15(Corridor Importance) − 0.20(Wildfire Risk) − 0.15(Existing Protection) + 0.20(Climate Resilience)
+
+All input variables were min-max scaled to a 0-1 range prior to combination. Wildfire risk used log-transformed cumulative burned acreage per cell (2000-2025) to reduce the influence of a small number of extreme megafire events on the overall distribution. Existing protection was calculated as the true overlapping area between each grid cell and dissolved CPAD protected-area geometries, expressed as a percentage of cell area, and was weighted negatively on the reasoning that already-protected land represents lower incremental conservation opportunity than comparable unprotected land. Habitat suitability used the Random Forest-predicted probability of mountain lion presence (Section 2.4). Climate resilience was operationalized as the inverse of scaled projected temperature change (Section 2.5). Corridor importance used the min-max scaled corridor-usage score described in Section 2.8, giving cells that participate in more of the identified least-cost paths a proportionally higher score. This is a revision of an earlier three-input formula (Section 2.5-2.6 as originally developed) that combined only habitat suitability, wildfire risk, protection status, and climate resilience (with weights 0.35/0.25/0.20/0.20); introducing the corridor term required redistributing weight away from all four original inputs (0.30/ - /0.20/0.15/0.20) to preserve a weighted sum, and this redistribution, not the corridor term in isolation, is partly responsible for the resulting shift in top-ranked cells (6 of the top 10 priority cells were shared between the pre- and post-connectivity versions; see Section 3.6). Final scores were rescaled to a 0-100 range for interpretability. All weights in this formula were assigned subjectively rather than derived from stakeholder input or empirical calibration; a systematic sensitivity analysis across alternative weightings remains identified as future work (Section 6).
+
+***2.7 Optimization Approach***
+
+A budget-constrained knapsack optimization was formulated to select the subset of grid cells maximizing total priority score without exceeding a fixed conservation budget, solved as a binary integer program using the CBC solver via the PuLP library. Acquisition cost per cell was estimated as the product of unprotected acreage and an assumed per-acre cost of $2,000, plus a fixed $2,000,000 per-parcel cost representing legal, survey, and administrative overhead. Cells with 90% or greater existing protection were excluded from the candidate pool, as an initial formulation without this constraint and without a meaningful fixed cost produced a degenerate solution favoring large numbers of trivially cheap, marginally protected cells over genuinely high-value parcels (see Section 4 for discussion). The budget was set at $2,464,671,068 (approximately 2% of the $123,233,553,417 estimated total cost of protecting all remaining unprotected land statewide).
+
+***2.8 Connectivity Analysis***
+
+Habitat quality alone does not capture whether suitable areas are functionally reachable by a wide-ranging species. To address this, a least-cost path connectivity analysis was conducted using the predicted habitat suitability surface as a movement resistance layer, following resistance-surface-based landscape connectivity methodology broadly consistent with circuit and least-cost-path-based approaches established in the ecological literature (McRae et al. 2008). Grid cell adjacency was determined via spatial intersection (cells sharing an edge or corner), producing a graph of 4,498 nodes and 17,364 edges. Core habitat cells were defined as those in the top 15% of predicted suitability with at least 30% existing protection (n=328), and were grouped into 77 spatially contiguous clusters via connected-component analysis; the five largest clusters (representing major habitat blocks such as the Sierra Nevada, North Coast, and Central Coast ranges) were selected as corridor anchor points. Movement resistance for each cell was defined as the inverse of its predicted habitat suitability, and least-cost paths between every pair of the five anchors (10 total corridors) were computed using Dijkstra's algorithm on the resistance-weighted graph. A corridor-usage score was calculated for each grid cell as the number of distinct anchor-pair paths passing through it, providing a continuous measure of connectivity importance rather than a binary corridor/non-corridor classification.
+
+***2.9 Weight Sensitivity Analysis***
+
+The priority score formula (Section 2.6) combines five components using a single, subjectively chosen set of weights (0.30/0.15/0.20/0.15/0.20). To assess how much this specific choice of weights determines the resulting priority rankings, a sensitivity analysis was conducted using 500 randomly generated alternative weight combinations, each drawn from a symmetric Dirichlet distribution over the five score components (habitat suitability, corridor importance, wildfire risk, existing protection, climate resilience), ensuring every random draw summed to 1 while exploring a wide range of relative emphasis across components. For each of the 500 weight combinations, the priority score was recomputed for all 4,498 grid cells and the top 50 highest-scoring cells (approximately the top 1%) were recorded. A per-cell sensitivity frequency was calculated as the proportion of the 500 simulations in which that cell appeared in the top 50, providing a continuous measure of how robust each cell's high-priority status is to the specific weighting scheme used.
+
+***2.10 External Validation***
+
+To assess how the study's priority rankings compare against an independently developed benchmark, results were validated against the California Department of Fish and Wildlife's Areas of Conservation Emphasis (ACE) dataset, version 3.2.4, a statewide hexagon-based (2.5 sq. mi.) synthesis of species biodiversity, rarity, endemism, and connectivity data, built independently of this study using different underlying methodology and data sources. Each grid cell centroid was spatially joined to its corresponding ACE hexagon (4,099 of 4,498 cells matched; unmatched cells fell outside ACE's hexagon coverage, primarily at coastal and state-border edges). Two ACE metrics were used for comparison: the statewide Species Biodiversity Rank (1-5, synthesizing native species richness, rare species richness, and irreplaceability across seven taxonomic groups) was compared against the study's final priority score, and the Terrestrial Connectivity Rank (1-5, based on Omniscape circuit-theory modeling, documented road-crossing locations, and regional habitat linkage data) was compared against the study's corridor-usage metric (Section 2.8).
+
+***2.11 Decision Insights: Budget Sensitivity and Robust Priority Areas***
+
+A single optimized selection at one fixed budget answers what should be funded, but not how sensitive that answer is to the budget actually available, nor which parcels remain worth funding across a range of plausible budgets, which are both practically important questions for a funder deciding how much to allocate. To address this, the budget-constrained optimization (Section 2.7) was re-solved at four budget levels (-10%, base, +10%, and +25% of the $2,464,671,068 base budget), and the resulting selections were compared to identify (a) the marginal conservation value of each additional increment of funding, and (b) "no-regret" parcels selected across every budget level tested, representing priorities robust to uncertainty in the eventual available budget. Top-ranked and no-regret cells were additionally matched to their containing county (US Census TIGER/Line) and nearest named CPAD-protected site, to translate grid-cell identifiers into geographically interpretable locations.
+
+***2.12 Multi-Objective Portfolio Comparison***
+
+Collapsing habitat suitability, wildfire risk, protection status, climate resilience, and corridor importance into a single weighted priority score (Section 2.6) is convenient for ranking and optimization, but can obscure tradeoffs between conservation objectives that a funder may wish to consider explicitly. To surface these tradeoffs, four additional budget-constrained optimizations were solved at the same $2,464,671,068 budget, each maximizing a single scaled (0-100) objective in isolation: habitat suitability alone ("Biodiversity"), climate resilience alone ("Climate"), corridor importance alone ("Connectivity"), and the full balanced score used elsewhere in this paper ("Balanced"). The resulting four portfolios were compared via pairwise cell overlap, a cross-tabulation of each portfolio's average score across all four individual objective dimensions, and the proportion of the 88 previously identified corridor cells (Section 3.6) captured by each portfolio.
+
+***2.13 Computational Reproducibility***
+
+All analysis was conducted in Python 3.11 within a Jupyter notebook environment, using geopandas, rasterio, and fiona for spatial data handling, scikit-learn for classification modeling, networkx for connectivity graph construction, PuLP (CBC solver, version 2.10.3) for integer programming optimization, and scipy, numpy, and pandas for numerical processing. A fixed random seed (random_state = 42) was used for the train/test split, Random Forest model fitting, and background point generation to ensure consistent, reproducible results across runs; the Dirichlet-based sensitivity analysis (Section 2.9) used a separate fixed seed (42) for its 500 random weight draws. Development was conducted on macOS using an Anaconda Python distribution; a conda-forge environment specification is provided in the accompanying requirements.txt to avoid a GDAL library conflict encountered during development between pip- and conda-installed geospatial dependencies. Code, a fully documented Jupyter notebook, and this manuscript are maintained in a version-controlled repository to support independent reproduction of all reported results.
+
+**3. Results**
+
+***3.1 Manual vs. ML-Based Habitat Suitability***
+
+The Random Forest habitat suitability model (v2) and the manual occurrence-count proxy (v1) produced meaningfully different spatial patterns (Figure 1). The manual proxy showed sparse, clustered high-value cells concentrated near accessible coastal areas, consistent with observation-effort bias in citizen-science occurrence data. The ML-based suitability surface instead showed continuous high-suitability bands tracing the Sierra Nevada and coastal mountain ranges, consistent with known mountain lion habitat associations. The two approaches showed only moderate agreement (Spearman's rho = 0.406), and only one grid cell appeared in both approaches' top-10 ranked priority cells, indicating that the choice of habitat suitability method has a substantial practical effect on prioritization outcomes.
+
+*Figure 1. Manual occurrence-count proxy (v1, left) vs. Random Forest-predicted habitat suitability (v2, right). Spearman correlation = 0.406.*
+
+***3.2 Future Climate Projections***
+
+Under the SSP2-4.5 scenario, projected annual mean temperature by 2061-2080 increased consistently across all grid cells relative to the historical baseline, ranging from 1.42°C to 2.23°C (mean = 1.85°C, SD = 0.21°C). The narrow spread of this projected warming indicates a fairly spatially uniform temperature signal across California under this scenario. Projected precipitation change was comparatively modest and spatially variable, ranging from -3.6% to +7.3% (mean = +1.3%), consistent with the greater model uncertainty typically associated with precipitation projections relative to temperature.
+
+***3.3 Existing Protection Status***
+
+Percent protection per grid cell ranged from 0% to 100% (mean = 44.6%, median = 36.0%), with clear geographic clustering: heavy protection along the Sierra Nevada spine and northern coastal ranges, and minimal protection through the Central Valley agricultural corridor (Figure 2).
+
+*Figure 2. Percent of each grid cell under existing protection (CPAD Holdings).*
+
+***3.4 Final Priority Rankings***
+
+The final priority score, incorporating ML-based habitat suitability and projected future temperature change as the climate resilience term, ranged from 0 to 100 (mean = 42.1, median = 42.1). The single lowest-ranked cell (score = 0) was characterized by 37 recorded fires since 2000, 99.6% existing protection, and zero recorded mountain lion occurrences, which is a coherent result reflecting a high-elevation, already-protected, fire-prone area with limited incremental conservation value, consistent across all versions of the scoring model. The highest-priority cells clustered along the full length of California's coastal mountain ranges (Figure 3).
+
+*Figure 3. Final conservation priority score (0-100) by grid cell, incorporating ML-based habitat suitability and projected future (2061-2080) temperature change.*
+
+*[TODO: The earlier version of this map using historical temperature seasonality (fig_priority_final.png, already generated) can be included as a supplementary figure to visually accompany the 8/10 top-cell overlap discussion in Section 2.6, if page length allows.]*
+
+***3.5 Budget-Constrained Optimization***
+
+An initial optimization formulation, using total priority score as the sole objective without a meaningful fixed transaction cost per parcel, selected 1,254 cells by favoring a large number of nearly-cost-free, already highly protected cells over genuinely high-value parcels. After introducing a $2,000,000 fixed per-parcel acquisition cost and excluding cells with 90% or greater existing protection from the candidate pool, the optimizer selected 217 cells at a total cost of $2,464,621,439, achieving a combined priority score of 9,428 (average = 43.4 per cell). This represented an 87.6% improvement in total conservation value over a naive strategy of purchasing the 55 highest-ranked cells individually until the budget was exhausted (total score = 5,025; average = 91.4 per cell). The naive strategy achieved a higher average score per selected cell, but the optimized strategy achieved substantially greater aggregate conservation value by distributing the same budget across a larger number of moderately priced, still high-value parcels rather than concentrating it on a small number of premium cells (Table 2). This result was consistent with the optimization run on the earlier (pre-future-climate) version of the priority score, which achieved an 89% improvement over its corresponding naive baseline, indicating the optimization's practical benefit is robust to the specific habitat suitability and climate resilience formulation used.
+
+| **Strategy** | **Cells Selected** | **Total Cost** | **Total Priority Score** | **Avg. Score / Cell** |
+| --- | --- | --- | --- | --- |
+| Naive (top-ranked first) | 55 | $2,460,495,312 | 5,025 | 91.4 |
+| Optimized (knapsack) | 217 | $2,464,621,439 | 9,428 | 43.4 |
+
+*Table 2. Naive vs. optimized budget allocation strategy, at an equivalent ~$2.46B budget.*
+
+*[TODO: Insert the naive-vs-optimized selection map here if you generate it (the code for this was provided but output not yet shared).]*
+
+***3.6 Habitat Connectivity***
+
+The five largest core habitat clusters ranged from 8 to 53 grid cells, together anchoring a network of 10 pairwise least-cost corridors comprising 88 unique grid cells (Figure 4). Corridor cost varied substantially across anchor pairs, from a minimum resistance cost of 1.96 between two closely situated Southern California clusters to a maximum of 18.34 between the North Coast anchor and the southernmost anchor, reflecting the greater habitat fragmentation separating these regions. One cell was traversed by 8 of the 10 corridors, identifying it as a critical network chokepoint. Of the 88 identified corridor cells, 47.7% had less than 30% existing protection, indicating that nearly half of the land connecting California's major mountain lion habitat blocks currently lacks meaningful protection and is therefore vulnerable to being severed by future development.
+
+Incorporating corridor importance into the priority score (Section 2.6) produced a final, connectivity-aware ranking (Figure 5). Re-running the budget-constrained optimization (Section 2.7) under this final formulation, using the same $2,464,671,068 budget, selected 200 cells at a total cost of $2,464,641,829, achieving a combined priority score of 8,686 (average = 43.4 per cell), representing an 80.5% improvement over a naive top-ranked selection of 56 cells (total score = 4,811; average = 85.9 per cell) (Table 3). Notably, 11.5% of the optimized selection's land area fell within the identified corridor network, despite corridor cells comprising only approximately 2% of all grid cells statewide, which is a nearly six-fold overrepresentation achieved without any explicit corridor-selection constraint in the optimization. This indicates that the priority score and optimization together coherently capture connectivity value as an emergent property of the combined formulation, rather than corridors being incidentally included or excluded.
+
+*Figure 4. Final connectivity-aware conservation priority score (0-100) by grid cell.*
+
+*Figure 5. Least-cost corridors (red) connecting the five largest core habitat clusters (gold markers), overlaid on predicted habitat suitability (greyscale).*
+
+*Table 3. Naive vs. optimized budget allocation under the final connectivity-aware priority score (v4).*
+
+| **Strategy** | **Cells Selected** | **Total Cost** | **Total Priority Score** | **Avg. Score / Cell** |
+| --- | --- | --- | --- | --- |
+| Naive (top-ranked first) | 56 | $2,462,696,143 | 4,811 | 85.9 |
+| Optimized (knapsack, v4) | 200 | $2,464,641,829 | 8,686 | 43.4 |
+
+***3.7 Weight Sensitivity***
+
+No single grid cell appeared in the top 50 across all 500 random weightings, which is expected given the wide range of relative emphasis explored, including weightings that placed little to no importance on any individual component. However, 4 cells appeared in the top 50 in at least 90% of simulations, and 31 cells appeared in at least 50% of simulations (Figure 6), identifying a smaller set of conservation priorities that are robust to the specific choice of weights rather than artifacts of the particular formula used elsewhere in this paper. The 4 most robust cells shared a consistent profile: very high habitat suitability (0.92-1.00), minimal existing protection (0-15.9%), and low or zero recorded fire history, a combination that scores favorably under nearly any reasonable weighting because habitat suitability, low protection, and low fire risk all move the priority score in the same direction regardless of which component is emphasized most. Notably, all 4 of these highly robust cells were also present in the original top-50 ranking produced by the study's chosen weights (Section 2.6), indicating that the specific weighting used throughout this paper, while subjectively assigned, successfully identified the same cells that independent sensitivity testing shows to be robust conservation priorities.
+
+*Figure 6. Per-cell sensitivity frequency: proportion of 500 randomly weighted simulations in which each cell ranked in the top 50 priority cells.*
+
+***3.8 External Validation***
+
+The study's final priority score showed a moderate positive correlation with ACE's independently derived species biodiversity rank (Spearman's rho = 0.426). More notably, 78.5% of the study's top 10% priority-ranked cells fell within ACE's own top biodiversity tier (rank 4-5), compared to a baseline rate of 37.2% across all matched cells, which is more than double the rate expected by chance, providing meaningful external validation of the overall priority scoring framework despite being built from an entirely different data pipeline and a single-species focus.
+
+The corridor-usage metric showed a substantially weaker relationship with ACE's terrestrial connectivity rank (Spearman's rho = 0.046), and only a modest overrepresentation in ACE's top connectivity tier (38.8% vs. a 31.3% baseline). This divergence is interpreted as a reflection of methodological differences rather than an inconsistency in the corridor analysis: this study's corridor network is deliberately narrow, comprising 88 cells along 10 least-cost paths between 5 mountain-lion-specific core habitat anchors, whereas ACE's terrestrial connectivity layer is a broad, general-purpose statewide surface synthesizing circuit-theory modeling, multi-species and ungulate migration corridors, and documented road-crossing data not specific to any one species. A narrow, species-targeted corridor network would not be expected to align closely with a comprehensive, general-purpose connectivity layer, and this comparison is retained here as an honest report of a weak result rather than omitted, alongside the stronger biodiversity validation above.
+
+External validation of this kind is necessary but not sufficient on its own: agreement with ACE does not independently confirm that either dataset accurately represents true mountain lion habitat value, since both are model-based estimates rather than ground truth, and disagreement does not necessarily indicate error in either. The strong biodiversity-rank agreement (Section 3.8) is best interpreted as evidence that this study's single-species framework captures signal correlated with general regional biodiversity value, which is a reassuring but expected result given that mountain lions are frequently used as an umbrella species precisely because their habitat needs overlap with broader biodiversity patterns (Section 1.2). The weak connectivity-rank agreement is more informative: rather than indicating a flaw in this study's corridor analysis, it more likely reflects that this study's narrow, mountain-lion-specific corridor network and ACE's broad, multi-species connectivity layer are answering genuinely different questions (where does this species need to move? vs. where does connectivity generally matter across taxa?), and the two should be expected to diverge rather than converge. Where the two disagree, this study's finer-grained, species-specific corridor identification may in fact highlight locally important linkages that a general-purpose statewide layer would smooth over, which is a possibility this study cannot confirm without field-based validation (e.g., camera-trap or GPS-collar movement data) but which is a plausible direction for future ground-truthing.
+
+***3.9 Decision Insights***
+
+The optimized selection grew from 184 cells (-10% budget) to 244 cells (+25% budget), with total priority score increasing from 8,011 to 10,264 (Table 5). Selections were fully nested across all four budget levels where no cell selected at a lower budget was ever dropped at a higher one, indicating the optimizer's solution is purely additive rather than involving reallocation as funding changes. The average priority score of newly added cells did not decline strictly monotonically across budget steps (42.2, then 27.0, then 46.5 for each successive increment), reflecting that the knapsack solver selects whichever combination of cells best fits each new increment of budget headroom rather than adding cells in strict rank order; nonetheless, the newly added cells at every budget level scored below the base selection's average (43.4), consistent with the expected pattern of diminishing marginal returns. Of the 200 cells in the base selection, 184 (92.0%) were selected across all four budget scenarios tested, representing a set of "no-regret" conservation priorities whose value does not depend on the precise budget ultimately available.
+
+These no-regret parcels were concentrated in San Diego (21 cells), San Bernardino (12), Ventura (10), and Riverside (10) counties, spanning 45 counties in total, indicating that robust mountain lion conservation priorities are geographically widespread across California rather than confined to a single region (Table 6). By contrast, the single highest-scoring individual cells clustered more tightly along the Central Coast: the top-ranked cell (priority score = 100.0) lies in Santa Cruz County within 3.8km of the Younger Lagoon Reserve, and 6 of the top 10 cells fall in Santa Cruz, Monterey, and San Mateo counties, several immediately adjacent to named protected sites such as Waugh Avenue (323m), Coal Mine Ridge (251m), and Sedgwick Reserve (124m) (Table 5). This distinction between a concentrated Central Coast cluster of single highest-value cells and a broader, statewide-distributed set of budget-robust priorities offers more actionable guidance than either result alone: a funder seeking maximum concentrated impact would look first to the Central Coast, while a funder seeking priorities resilient to budget uncertainty would look to the broader, statewide no-regret set.
+
+*Table 5. Top-ranked priority cells with containing county and nearest named protected area.*
+
+| **Cell ID** | **County** | **Nearest Named Site** | **Distance (m)** | **Priority Score** |
+| --- | --- | --- | --- | --- |
+| 760 | Santa Cruz | Younger Lagoon Reserve | 3,833 | 100.0 |
+| 827 | Santa Cruz | Waugh Avenue | 323 | 99.4 |
+| 825 | Monterey | Sunset State Beach | 13,470 | 98.3 |
+| 643 | San Mateo | Memorial Park | 252 | 94.3 |
+| 702 | San Mateo | Coal Mine Ridge | 251 | 93.7 |
+| 2626 | Ventura | Harmon Canyon Preserve | 226 | 91.8 |
+| 2128 | Santa Barbara | Sedgwick Reserve | 124 | 90.5 |
+| 174 | Mendocino | Gualala Point Regional Park | 82 | 90.3 |
+
+*Table 6. Counties with the most no-regret (budget-robust) priority cells.*
+
+| **County** | **No-Regret Cells** | **Mean Priority Score** |
+| --- | --- | --- |
+| San Diego | 21 | 49.1 |
+| San Bernardino | 12 | 39.3 |
+| Ventura | 10 | 58.3 |
+| Riverside | 10 | 44.4 |
+| Santa Barbara | 8 | 45.7 |
+| Los Angeles | 8 | 58.5 |
+| Plumas | 8 | 27.3 |
+| San Luis Obispo | 7 | 39.4 |
+
+***3.10 Multi-Objective Portfolio Comparison***
+
+The four single-objective portfolios selected markedly different numbers of cells at the same budget: 146 (Biodiversity), 207 (Climate), 72 (Connectivity), and 200 (Balanced). Pairwise overlap between portfolios varied substantially (Table 7): Biodiversity and Climate shared 47.9% of the smaller portfolio's cells, while Climate and Connectivity shared only 12.5% which is the lowest overlap of any pair, indicating a genuine tradeoff between prioritizing climate-resilient land and prioritizing corridor-connective land. The Balanced portfolio overlapped most with Biodiversity (79.5%) and Climate (71.0%), but substantially less with Connectivity (31.9%).
+
+The cross-tabulation of average scores (Table 8) shows that the Connectivity-only portfolio scored highest not only on its own objective but also on habitat suitability (71.9) and climate resilience (69.7), exceeding the dedicated Biodiversity-only and Climate-only portfolios on their own respective objectives. This should not be interpreted as an independent co-benefit discovery. Connectivity is not statistically independent of habitat suitability in this study, because the movement resistance surface (Section 2.8) was itself derived directly from predicted habitat suitability; corridor cells are therefore drawn from high-suitability terrain by construction, not by an independently observed ecological relationship, and the apparent alignment with the climate objective likely reflects correlation between suitability and climate stability elsewhere in the model rather than an independent property of connectivity itself. A more informative and non-circular finding is that the Balanced portfolio, despite including an explicit corridor-importance term, captured only 26.1% of the 88 identified corridor cells, compared to 81.8% for the Connectivity-only portfolio (Table 8). This indicates that the balanced formulation's corridor weighting (0.15) is diluted by the sparsity of the underlying corridor signal, where only 88 of 4,498 cells carry any nonzero corridor-usage value, such that habitat and climate criteria dominate most cell selections even when connectivity is nominally included. A funder specifically prioritizing landscape connectivity would be better served by the Connectivity-only portfolio, or a reformulated balanced score with a substantially higher corridor weight, than by this study's default balanced formulation.
+
+*Table 7. Pairwise cell overlap between single-objective portfolios (percent of smaller portfolio).*
+
+| **Portfolio Pair** | **Cells Shared** | **% of Smaller Portfolio** |
+| --- | --- | --- |
+| Biodiversity ∩ Climate | 70 | 47.9% |
+| Biodiversity ∩ Connectivity | 30 | 41.7% |
+| Biodiversity ∩ Balanced | 116 | 79.5% |
+| Climate ∩ Connectivity | 9 | 12.5% |
+| Climate ∩ Balanced | 142 | 71.0% |
+| Connectivity ∩ Balanced | 23 | 31.9% |
+
+*Table 8. Average score on each objective dimension by portfolio, and corridor-cell capture rate.*
+
+| **Portfolio** | **Habitat** | **Climate** | **Connectivity** | **Balanced** | **% of 88 Corridor Cells Captured** |
+| --- | --- | --- | --- | --- | --- |
+| Biodiversity-only | 66.5 | 58.3 | 9.8 | 54.7 | 34.1% |
+| Climate-only | 26.3 | 61.3 | 2.2 | 38.0 | 10.2% |
+| Connectivity-only | 71.9 | 69.7 | 48.8 | 72.7 | 81.8% |
+| Balanced (v4) | 42.0 | 56.4 | 5.0 | 43.4 | 26.1% |
+
+Several results in this study were not fully anticipated at the outset and are worth highlighting explicitly, since they proved more informative than the confirmatory findings. First, incorporating connectivity into the priority score changed the top-ranked cells far more than incorporating updated future climate projections did (6 of 10 top cells retained after adding connectivity, versus 8 of 10 retained after switching to projected temperature change), suggesting that landscape structure has a larger practical influence on conservation priority than the specific climate scenario used, at least at the moderate warming levels projected here. Second, the study's balanced formulation, despite explicitly including a corridor-importance term, still concentrated only 26.1% of the identified corridor cells in its optimized selection, an unexpectedly low figure that revealed a real limitation in how a sparse, mostly-zero connectivity signal gets diluted inside a weighted-average score (Section 3.10). Third, external validation against ACE agreed strongly on overall biodiversity value but far less on connectivity specifically, a discrepancy that, once examined, more likely reflects a genuine methodological difference in scope (single-species vs. general-purpose corridors) than an error in either dataset. Finally, the robust, budget-independent "no-regret" priority cells identified through sensitivity analysis clustered geographically in Southern California (San Diego, San Bernardino, Ventura, and Riverside counties; Section 3.9) more than the Central Coast pattern that dominated the single highest-ranked cells, which is a distinction consistent with independent genetic evidence that Southern California's puma populations face acute connectivity pressure from freeway and urban barriers (Ernest et al. 2014), suggesting the sensitivity-robust priorities identified here may be capturing genuine regional conservation urgency rather than an artifact of the scoring formula.
+
+These results carry practical implications beyond their numerical values. The finding that 47.7% of identified corridor cells have less than 30% existing protection (Section 3.6) suggests that habitat protection alone is insufficient if the landscape connecting protected areas continues to fragment: even highly suitable, well-protected core habitat patches may lose long-term conservation value if the land between them becomes impassable, isolating populations regardless of how well any single patch is managed. This reframes the practical implication of this study's results away from "which individual parcels are highest value" and toward "which parcels, if lost, would most damage the functioning of the broader habitat network", a distinction with direct relevance to how a conservation agency should sequence acquisitions under a limited budget.
+
+The optimized budget allocation's 87.6% improvement over naive top-ranked selection (Section 3.6) is not simply a matter of better sorting; the naive strategy is myopic because it purchases the single highest-scoring cell it can afford at each step without considering how remaining budget could be spent afterward, which systematically favors a small number of expensive, high-score cells over combinations of cheaper, still-valuable cells that collectively deliver more total conservation value for the same money. Integer programming instead evaluates the full combinatorial space of feasible portfolios simultaneously, which is precisely why it identifies allocations a purely rank-based heuristic structurally cannot reach. This distinction matters practically: conservation funding decisions made by ranking parcels and purchasing top-down, a common real-world practice, may be leaving substantial conservation value unrealized relative to what a formal optimization approach applied to the same budget and the same underlying priority data could achieve.
+
+The road-distance predictor's exclusion (Section 2.4) should not be read as a failed feature or a wasted analytical step. Its inclusion, diagnosis, and removal demonstrate precisely why ecological machine learning requires ecological reasoning rather than purely statistical model selection: a feature that measurably improved predictive performance (AUC increased from 0.945 to 0.949) was nonetheless excluded because its direction of effect contradicted well-established species biology, revealing that the predictive gain reflected observation-effort bias rather than genuine habitat signal. A workflow that selected features on predictive performance alone, without this ecological check, would have retained a biased predictor and silently produced a systematically distorted habitat suitability surface. This episode is offered as a concrete, reproducible illustration of a broader principle for applied ecological modeling: statistical validity and ecological validity must both be examined, and neither is sufficient on its own.
+
+This framework should be positioned alongside, rather than in competition with, established systematic conservation planning tools such as Marxan (Ball et al. 2009) and Zonation (Moilanen et al. 2009), both of which remain the dominant, well-validated software platforms for large-scale, planning-unit-based reserve-selection problems. This study does not claim to outperform these tools; rather, it occupies a different niche: an open-source, fully scripted, end-to-end workflow that integrates species distribution modeling, connectivity analysis, and budget-constrained optimization within a single reproducible Python pipeline, prioritizing transparency and adaptability over the breadth of features and large-scale computational efficiency that mature tools like Marxan and Zonation offer. For a practitioner or student without access to specialized conservation-planning software or training, this framework demonstrates that a comparable decision-support pipeline can be built, audited, and modified end-to-end using widely available open-source scientific Python libraries, which may lower the barrier to entry for smaller organizations or exploratory analyses relative to purpose-built commercial or semi-commercial systematic conservation planning software.
+
+*Table 9. Positioning of this framework's components relative to typical conservation prioritization studies.*
+
+| Module | Existing Methods (typical) | This Framework |
+| --- | --- | --- |
+| Habitat suitability modeling | Common | Yes |
+| Future climate projections | Sometimes | Yes |
+| Landscape connectivity | Sometimes | Yes |
+| Budget-constrained optimization | Sometimes | Yes |
+| Weight sensitivity analysis | Rare | Yes |
+| External independent validation | Rare | Yes |
+| Fully reproducible open-source pipeline | Rare | Yes |
+
+**4. Discussion**
+
+*[TODO: The paragraph below is a starting point - expand on it and add: (1) the optimization exploit/fix story (Section 2.7) as an instructive example of realistic constraint design; (2) what the corridor findings (Section 3.6) mean practically - 47.7% of corridor land being unprotected is a strong, citable finding worth its own paragraph; (3) the road-distance diagnostic (Section 2.4) as a worked example of catching and correctly handling observation bias, rather than a failure; (4) an explicit transferability closing statement tying back to the Introduction's framing.]*
+
+Occurrence density identifies where mountain lions have historically been observed, whereas the Random Forest identifies where suitable habitat is predicted to exist based on ecological conditions. Differences between these approaches highlight potential areas that may be under-sampled or overlooked despite possessing characteristics favorable for long-term habitat suitability.
+
+The framework presented here is intentionally modular: while the computational workflow of species distribution modeling, connectivity analysis, multi-criteria prioritization, spatial optimization, and sensitivity and validation analysis is transferable across species and regions, ecological feature selection should be informed by the biology of the focal species and is not itself transferable as a fixed predictor set. Variables appropriate for mountain lions (elevation, temperature, wildfire exposure, road avoidance) would likely be insufficient for amphibians, migratory birds, or aquatic taxa, which may depend instead on hydrology, vegetation structure, breeding habitat availability, or water quality. Consequently, transferability in this study refers specifically to the computational architecture rather than to a fixed predictor set (Table 4): only the occurrence data and the choice of environmental predictors are inherently species-specific, while the remaining stages are algorithmic and reusable by substituting the occurrence dataset and predictor variables appropriate to a different focal species' ecology, without altering the underlying methodology. This distinction is the core contribution of this study: not any single algorithm or dataset, but the integration of species distribution modeling, connectivity analysis, multi-criteria prioritization, and budget-constrained optimization into one modular, reproducible decision-support pipeline.
+
+*Table 4. Framework components classified by generalizability across species and conservation contexts.*
+
+| **Module** | **Generalizable?** | **Requires Species-Specific Customization?** |
+| --- | --- | --- |
+| Occurrence data | No | Yes |
+| Environmental predictor selection | No | Yes |
+| Feature engineering | Partial | Often |
+| Species distribution model | Yes | Hyperparameters only |
+| Connectivity analysis | Yes | Resistance surface values |
+| Multi-criteria prioritization / optimization | Yes | Objective weights |
+| Sensitivity analysis | Yes | No |
+| External validation | Yes | Reference dataset choice |
+
+*Table **5**. Example predictor variables by focal species, illustrating why environmental predictor selection is not transferable even though the computational workflow is.*
+
+| Focal Species | Example Predictors |
+| --- | --- |
+| Mountain lion (this study) | Elevation, temperature, precipitation, wildfire history |
+| Pacific salmon | Stream temperature, flow rate, culvert/dam barriers, water chemistry |
+| Spotted owl | Canopy cover, old-growth forest extent, nest site availability |
+
+**5. Limitations**
+
+- Species occurrence data is presence-only and subject to substantial observation-effort bias: citizen-science sightings cluster near accessible, populated areas rather than reflecting true species distribution, a pattern directly visible in the divergence between the v1 and v2 habitat suitability approaches (Section 3.1).
+
+- The initial random-split AUC (0.945) was found to be substantially inflated by spatial autocorrelation; spatial block cross-validation (Section 2.4) produced a more conservative and reliable estimate (AUC = 0.841), which is reported as the primary performance metric throughout this paper. Some residual spatial dependence may remain even at the block level chosen (~50km), and the same underlying observation-effort bias discussed above may still affect which regions are represented in the presence data used to train and evaluate the model, independent of the train/test splitting strategy.
+
+- Wildfire risk was calculated using full fire-perimeter acreage attributed to every grid cell a fire polygon touches, rather than the precise proportional area of overlap, which may overstate burned acreage in cells only partially covered by a given fire.
+
+- Conservation acquisition costs are estimated using simplified assumptions (flat per-acre cost, flat per-parcel administrative overhead) rather than actual real estate or easement valuation data, which vary substantially by land type, location, and market conditions.
+
+- Priority score weights were assigned subjectively rather than derived from stakeholder input or empirical calibration. A sensitivity analysis (Sections 2.9, 3.7) partially addresses this concern by identifying a small set of cells whose high-priority status is robust across 500 randomly generated alternative weightings, and by confirming these robust cells were also captured by the study's chosen weights; however, rankings outside this robust core (e.g., cells ranked 50-200, which make up the bulk of the optimized selection in Section 3.6) remain more sensitive to the specific weights used, and stakeholder-elicited weights (e.g., via AHP or Delphi methods) would strengthen this further.
+
+- Because only one global climate model (MPI-ESM1-2-HR) and one emissions scenario (SSP2-4.5) were evaluated out of 23 models and 4 scenarios available in the source data, the absolute spatial ranking of climate-resilient habitat produced by this study should not be interpreted as robust to climate-model uncertainty; a different model or scenario could plausibly shift which specific cells rank as most climate-resilient, even if the general statewide warming signal is likely to hold across models.
+
+- The connectivity analysis used only the five largest of 77 identified core habitat clusters as corridor anchors, and computed least-cost paths only between anchor pairs rather than a comprehensive, continuous connectivity surface; smaller core areas and non-anchor-to-anchor movement pathways are not represented.
+
+- Movement resistance for the connectivity analysis was derived solely from predicted habitat suitability; it does not directly incorporate known physical barriers such as highways, urban development, or fencing, which could independently obstruct movement even through otherwise suitable habitat.
+
+- External validation against ACE (Section 3.8) showed strong agreement for overall priority (78.5% top-tier overlap vs. a 37.2% baseline) but weak agreement for connectivity specifically (Spearman's rho = 0.046), likely reflecting the difference between this study's narrow, single-species corridor network and ACE's broad, multi-species, general-purpose connectivity layer rather than a flaw in either approach; a more comparable validation would require a multi-species or general-purpose connectivity analysis.
+
+- The optimization assumes parcels are independently purchasable at the estimated cost; it does not model willingness of landowners to sell, negotiation dynamics, or the possibility that acquiring one parcel changes the cost or feasibility of acquiring adjacent parcels.
+
+- The framework omits land ownership structure, political and jurisdictional feasibility, and restoration costs for degraded parcels, all of which materially affect real-world conservation acquisition decisions beyond raw land cost and priority score.
+
+- Pseudo-absence generation used uniform random background sampling rather than target-group or environmentally stratified background sampling (Section 2.4), which may introduce or mask spatial sampling bias in ways not fully characterized by this study.
+
+- Climate, occurrence, fire, and protection datasets represent different and partially non-overlapping time periods (Section 2.3), introducing temporal mismatch that this study does not formally correct for.
+
+- This analysis considers a single focal species; a true multi-species or general-biodiversity prioritization would require additional occurrence datasets and may prioritize different areas.
+
+The limitations above should not be read as isolated caveats: together, they represent the major sources of uncertainty in this framework. Single-GCM climate projections, subjective priority-score weights, uniform random pseudo-absence sampling, and temporal mismatch across datasets each introduce a different kind of uncertainty (scenario uncertainty, valuation uncertainty, sampling uncertainty, and data-currency uncertainty, respectively), and their combined effect on the final priority rankings has not been formally propagated or quantified in this study. Future work formally combining these uncertainty sources, for example through a multi-model, multi-weighting ensemble approach, would substantially strengthen confidence in which specific parcels are truly robust conservation priorities versus artifacts of one particular set of modeling choices.
+
+**6. Future Work**
+
+*[TODO: Model comparison (Section 2.4), connectivity analysis (Section 2.8), weight sensitivity analysis (Section 2.9), and external validation against ACE (Section 2.10) are now complete; update this list accordingly. Remaining suggested items: (1) target-group background sampling to reduce observation-effort bias in the SDM; (2) incorporate land cover / vegetation data to strengthen habitat suitability beyond climate/elevation alone; (3) extend the connectivity analysis to a comprehensive, multi-species, or general-purpose formulation more directly comparable to ACE's terrestrial connectivity layer, and incorporate roads/urban development directly into the resistance surface; (4) extend to multi-species analysis using additional umbrella or indicator species; (5) replace flat cost assumptions with actual land valuation data where available; (6) build an interactive dashboard allowing stakeholders to adjust weights and budget in real time.]*
+
+**7. Conclusion**
+
+This study presents a modular, reproducible GIS framework that integrates species distribution modeling, climate resilience, connectivity, and spatial optimization to identify robust conservation investments under uncertainty. Model comparison, spatial cross-validation, weight sensitivity analysis, and external validation against an independently developed benchmark each provided evidence-based checks on components of the framework that are often left unexamined in single-pass conservation prioritization studies, and in several cases (the road-distance diagnostic, the ACE connectivity comparison) surfaced genuine limitations that were addressed or explicitly documented rather than obscured. While demonstrated using mountain lions in California, the framework is modular rather than species-specific (Section 4): its predictive, connectivity, prioritization, and optimization components are transferable to other focal species and conservation contexts, provided that occurrence data and environmental predictors are adapted to the ecology of the species and objectives under study. The result is not a single conservation map, but a flexible, reusable foundation for climate-resilient conservation decision-making.
+
+**8. Plain-Language Summary**
+
+*[TODO: Write 3-5 sentences a non-technical reader (e.g., a hiring manager skimming this) could understand. Suggested starting point: 'This project builds a data-driven tool to help decide where California should spend limited conservation funding to protect mountain lion habitat. It combines wildlife sighting data, wildfire history, climate data, and existing park boundaries into a single map ranking every region of the state by conservation value. A machine learning model trained on climate data gave meaningfully different (and more geographically coherent) recommendations than simply looking at where lions have been spotted, showing that data-driven modeling can reveal important habitat that basic observation data misses. An optimization algorithm was also used to show that a fixed budget can fund far more conservation value by spreading investment across many moderately-priced parcels rather than a few expensive top-ranked ones.']*
+
+Traditional conservation prioritization based solely on occurrence records may overlook ecologically suitable habitats. Machine learning integrated with GIS can identify additional high-value conservation areas that observation-based methods alone fail to capture. A model comparison confirmed that a more flexible machine learning approach clearly outperformed a simpler linear model, and a diagnostic check caught and removed a misleading signal in the data before it could bias the results. The project also mapped wildlife corridors connecting major habitat areas and found that nearly half of that connecting land currently has no meaningful protection. When the budget-allocation tool was run on the final version of the model, it automatically protected corridor land at almost six times the rate expected by chance, even though it was never explicitly told to prioritize corridors, showing that the different pieces of the framework reinforce each other.
+
+**References**
+
+*Cite every data source properly, including GBIF's DOI citation for the specific occurrence download used. Use a consistent citation style (APA recommended).*
+
+Ball, I. R., Possingham, H. P., & Watts, M. (2009). Marxan and relatives: Software for spatial conservation prioritisation. In A. Moilanen, K. A. Wilson, & H. P. Possingham (Eds.), Spatial conservation prioritisation: Quantitative methods and computational tools (pp. 185–195). Oxford University Press.
+
+Barbet-Massin, M., Jiguet, F., Albert, C. H., & Thuiller, W. (2012). Selecting pseudo-absences for species distribution models: How, where and how many? Methods in Ecology and Evolution, 3(2), 327–338. https://doi.org/10.1111/j.2041-210X.2011.00172.x
+
+Cutler, D. R., Edwards, T. C., Jr., Beard, K. H., Cutler, A., Hess, K. T., Gibson, J., & Lawler, J. J. (2007). Random forests for classification in ecology. Ecology, 88(11), 2783–2792. https://doi.org/10.1890/07-0539.1
+
+Ernest, H. B., Vickers, T. W., Morrison, S. A., Buchalski, M. R., & Boyce, W. M. (2014). Fractured genetic connectivity threatens a southern California puma (Puma concolor) population. PLOS ONE, 9(10), e107985. https://doi.org/10.1371/journal.pone.0107985
+
+Fick, S. E., & Hijmans, R. J. (2017). WorldClim 2: New 1-km spatial resolution climate surfaces for global land areas. International Journal of Climatology, 37(12), 4302–4315. https://doi.org/10.1002/joc.5086
+
+Fielding, A. H., & Bell, J. F. (1997). A review of methods for the assessment of prediction errors in conservation presence/absence models. Environmental Conservation, 24(1), 38–49. https://doi.org/10.1017/S0376892997000088
+
+GBIF.org. GBIF Occurrence Download. Global Biodiversity Information Facility. https://www.gbif.org [Note: replace with the DOI-backed citation generated for the specific occurrence download used in this study, available via GBIF's download interface.]
+
+McRae, B. H., Dickson, B. G., Keitt, T. H., & Shah, V. B. (2008). Using circuit theory to model connectivity in ecology, evolution, and conservation. Ecology, 89(10), 2712–2724. https://doi.org/10.1890/07-1861.1
+
+Moilanen, A., Wilson, K. A., & Possingham, H. P. (Eds.). (2009). Spatial conservation prioritization: Quantitative methods and computational tools. Oxford University Press.
+
+Roberts, D. R., Bahn, V., Ciuti, S., Boyce, M. S., Elith, J., Guillera-Arroita, G., Hauenstein, S., Lahoz-Monfort, J. J., Schröder, B., Thuiller, W., Warton, D. I., Wintle, B. A., Hartig, F., & Dormann, C. F. (2017). Cross-validation strategies for data with temporal, spatial, hierarchical, or phylogenetic structure. Ecography, 40(8), 913–929. https://doi.org/10.1111/ecog.02881
+
+[TODO: Add remaining citations for CAL FIRE FRAP, CPAD (GreenInfo Network), US Census TIGER/Line, and CDFW ACE, following each source's official citation guidance from their respective data portals.]
+
+1
