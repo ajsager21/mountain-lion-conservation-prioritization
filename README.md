@@ -217,5 +217,5 @@ Optimizing Conservation Investments Under Climate Change.
 
 ## Author
 
-**A.J. Sager** — University of California, Irvine
+**A.J. Sager** 
 Data science · GIS · conservation biology
