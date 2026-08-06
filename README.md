@@ -211,8 +211,8 @@ Full discussion, including how these limitations interact and compound, is in [S
 If you use this framework or build on it, please cite:
 
 ```
-Sager, A.J. (2026). Climate-Resilient Conservation Prioritization Using GIS and Machine Learning:
-Optimizing Conservation Investments Under Climate Change. University of California, Irvine.
+Sager, AJ (2026). Climate-Resilient Conservation Prioritization Using GIS and Machine Learning:
+Optimizing Conservation Investments Under Climate Change. 
 ```
 
 ## Author
